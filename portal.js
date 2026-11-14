@@ -14,10 +14,22 @@
   const PLAY_STORE_URL = '';
   let state = 0;
 
+  function showUnavailable() {
+    form.querySelector('.card-description').textContent =
+      'As consultas estão temporariamente indisponíveis. Tente novamente mais tarde.';
+    form.querySelectorAll('.field').forEach((field) => { field.hidden = true; });
+    form.querySelectorAll('input, button').forEach((control) => { control.disabled = true; });
+    byId('submit').textContent = 'Consulta indisponível';
+  }
+
   async function configureMode() {
     try {
       const response = await fetch('/api/mode', { cache: 'no-store' });
       const config = await response.json();
+      if (config.consultationAvailable === false) {
+        showUnavailable();
+        return;
+      }
       if (!config.testMode) return;
       byId('submit').firstChild.textContent = 'Gerar código de teste ';
       const instructions = byId('test-instructions');

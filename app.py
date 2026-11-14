@@ -26,10 +26,15 @@ if TEST_MODE:
 
     CLIENTS = TEST_CLIENTS
 else:
-    CLIENTS = load_clients(ROOT / "clientes_consolidados_completo.xlsx")
+    try:
+        CLIENTS = load_clients(ROOT / "clientes_consolidados_completo.xlsx")
+    except FileNotFoundError:
+        CLIENTS = None
 PENDING = {}
 ATTEMPTS = defaultdict(deque)
 app = Flask(__name__, static_folder=None)
+if CLIENTS is None:
+    app.logger.warning("Base privada ausente; consultas indisponíveis neste ambiente.")
 app.secret_key = os.environ.get("PORTAL_SESSION_SECRET") or secrets.token_hex(32)
 app.config.update(
     MAX_CONTENT_LENGTH=2048,
@@ -43,6 +48,12 @@ app.config.update(
 def test_mode_local_only():
     if TEST_MODE and request.remote_addr not in ("127.0.0.1", "::1"):
         return jsonify(error="Modo de teste disponível apenas no computador local."), 403
+
+
+@app.before_request
+def require_consultation_data():
+    if CLIENTS is None and request.endpoint in ("request_code", "check_code"):
+        return jsonify(error="As consultas estão temporariamente indisponíveis. Tente novamente mais tarde."), 503
 
 
 @app.after_request
@@ -68,8 +79,8 @@ def mode():
     if TEST_MODE:
         from test_fixture import TEST_CPF, TEST_PHONE
 
-        return jsonify(testMode=True, testCpf=TEST_CPF, testPhone=TEST_PHONE)
-    return jsonify(testMode=False)
+        return jsonify(testMode=True, consultationAvailable=True, testCpf=TEST_CPF, testPhone=TEST_PHONE)
+    return jsonify(testMode=False, consultationAvailable=CLIENTS is not None)
 
 
 def limited(key, maximum=5, window=3600):

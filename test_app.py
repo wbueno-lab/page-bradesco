@@ -3,7 +3,8 @@
 import unittest
 from unittest.mock import patch
 
-import app as portal
+with patch("client_data.load_clients", return_value={}):
+    import app as portal
 from test_fixture import TEST_CLIENTS, TEST_CPF, TEST_PHONE
 
 
