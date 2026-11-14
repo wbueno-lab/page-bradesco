@@ -13,7 +13,6 @@ class ConsultationTests(unittest.TestCase):
         portal.app.config["TESTING"] = True
         self.client = portal.app.test_client()
         portal.ATTEMPTS.clear()
-        portal.PENDING.clear()
         self.clients = {
             "12345678901": {
                 "name": "Pessoa Exemplo",

@@ -6,3 +6,6 @@ __pycache__/
 *.xlsx
 *.apk
 .env
+.portal-data-key.tmp
+
+.vercel

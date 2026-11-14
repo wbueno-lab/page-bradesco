@@ -14,7 +14,12 @@ from urllib.request import Request, urlopen
 
 from flask import Flask, jsonify, request, send_file, session
 
-from client_data import load_clients, normalize_cpf, normalize_phone
+from client_data import (
+    ClientDataUnavailable,
+    load_clients_for_environment,
+    normalize_cpf,
+    normalize_phone,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -27,20 +32,33 @@ if TEST_MODE:
     CLIENTS = TEST_CLIENTS
 else:
     try:
-        CLIENTS = load_clients(ROOT / "clientes_consolidados_completo.xlsx")
-    except FileNotFoundError:
+        CLIENTS = load_clients_for_environment(ROOT)
+    except (ClientDataUnavailable, FileNotFoundError):
         CLIENTS = None
-PENDING = {}
 ATTEMPTS = defaultdict(deque)
 app = Flask(__name__, static_folder=None)
 if CLIENTS is None:
     app.logger.warning("Base privada ausente; consultas indisponíveis neste ambiente.")
-app.secret_key = os.environ.get("PORTAL_SESSION_SECRET") or secrets.token_hex(32)
+
+
+def build_session_secret():
+    configured_secret = os.environ.get("PORTAL_SESSION_SECRET")
+    if configured_secret:
+        return configured_secret
+    data_key = os.environ.get("PORTAL_DATA_KEY")
+    if data_key:
+        return sha256(f"portal-session:{data_key}".encode()).hexdigest()
+    return secrets.token_hex(32)
+
+
+app.secret_key = build_session_secret()
 app.config.update(
     MAX_CONTENT_LENGTH=2048,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Strict",
-    SESSION_COOKIE_SECURE=os.environ.get("PORTAL_COOKIE_SECURE") == "1",
+    SESSION_COOKIE_SECURE=(
+        os.environ.get("PORTAL_COOKIE_SECURE", os.environ.get("VERCEL", "0")) == "1"
+    ),
 )
 
 
@@ -94,11 +112,18 @@ def limited(key, maximum=5, window=3600):
     return False
 
 
-def purge_expired():
-    now = datetime.now(timezone.utc)
-    for ticket, pending in list(PENDING.items()):
-        if pending["expires"] < now:
-            PENDING.pop(ticket, None)
+def get_pending_verification():
+    pending = session.get("verification")
+    if not isinstance(pending, dict):
+        return None
+    try:
+        expires = datetime.fromisoformat(pending["expires"])
+        cpf = pending["cpf"]
+        phone = pending["phone"]
+    except (KeyError, TypeError, ValueError):
+        session.clear()
+        return None
+    return {**pending, "cpf": cpf, "phone": phone, "expires": expires}
 
 
 def twilio_verify(endpoint, fields):
@@ -127,7 +152,6 @@ def twilio_verify(endpoint, fields):
 
 @app.post("/api/request-code")
 def request_code():
-    purge_expired()
     if limited(("request", request.remote_addr)):
         return jsonify(error="Muitas tentativas. Tente novamente mais tarde."), 429
 
@@ -151,14 +175,12 @@ def request_code():
             except (HTTPError, URLError, TimeoutError):
                 return jsonify(error="Não foi possível enviar o SMS agora."), 503
 
-        ticket = secrets.token_urlsafe(32)
-        PENDING[ticket] = {
+        session["verification"] = {
             "cpf": cpf,
             "phone": phone,
-            "expires": datetime.now(timezone.utc) + timedelta(minutes=10),
+            "expires": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
             "test_code": test_code,
         }
-        session["ticket"] = ticket
         if TEST_MODE:
             return jsonify(message="Código de teste gerado localmente. Nenhum SMS foi enviado.", testCode=test_code)
 
@@ -172,13 +194,11 @@ def check_code():
 
     data = request.get_json(silent=True) or {}
     code = str(data.get("code", "")).strip()
-    ticket = session.get("ticket")
-    pending = PENDING.get(ticket)
+    pending = get_pending_verification()
     if not pending or not code.isdigit() or not 4 <= len(code) <= 10:
         return jsonify(error="Código inválido ou expirado."), 400
 
     if datetime.now(timezone.utc) > pending["expires"]:
-        PENDING.pop(ticket, None)
         session.clear()
         return jsonify(error="Código expirado. Solicite outro SMS."), 400
 
@@ -193,7 +213,6 @@ def check_code():
     if not approved:
         return jsonify(error="Código incorreto ou expirado."), 400
 
-    PENDING.pop(ticket, None)
     session.clear()
     amount_cents = 120000 + int(sha256(pending["cpf"].encode()).hexdigest()[:8], 16) % 160001
     client = CLIENTS[pending["cpf"]]

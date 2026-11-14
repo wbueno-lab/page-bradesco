@@ -1,10 +1,21 @@
 """Leitura da planilha privada para consultas autorizadas por CPF."""
 
 from collections import defaultdict
+from io import BytesIO
+import os
 from pathlib import Path
 import re
 
+from cryptography.fernet import Fernet, InvalidToken
 from openpyxl import load_workbook
+
+
+PLAINTEXT_CLIENT_DATA_FILENAME = "clientes_consolidados_completo.xlsx"
+ENCRYPTED_CLIENT_DATA_FILENAME = "client_data.fernet"
+
+
+class ClientDataUnavailable(RuntimeError):
+    """Indica que a base privada não pode ser aberta com segurança."""
 
 
 def normalize_cpf(value):
@@ -50,3 +61,25 @@ def load_clients(path: Path):
         return clients
     finally:
         workbook.close()
+
+
+def load_clients_for_environment(root: Path, environment=None):
+    """Carrega dados locais em desenvolvimento e dados criptografados na Vercel."""
+    environment = os.environ if environment is None else environment
+    plaintext_path = root / PLAINTEXT_CLIENT_DATA_FILENAME
+    if environment.get("VERCEL") != "1" and plaintext_path.is_file():
+        return load_clients(plaintext_path)
+
+    encrypted_path = root / ENCRYPTED_CLIENT_DATA_FILENAME
+    if not encrypted_path.is_file():
+        raise FileNotFoundError(encrypted_path)
+
+    key = str(environment.get("PORTAL_DATA_KEY", "")).strip()
+    if not key:
+        raise ClientDataUnavailable("PORTAL_DATA_KEY não configurada")
+
+    try:
+        payload = Fernet(key.encode("ascii")).decrypt(encrypted_path.read_bytes())
+    except (InvalidToken, UnicodeEncodeError, ValueError) as error:
+        raise ClientDataUnavailable("Base privada ou chave inválida") from error
+    return load_clients(BytesIO(payload))
