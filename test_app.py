@@ -24,6 +24,15 @@ class ConsultationTests(unittest.TestCase):
         self.clients_patch.start()
         self.addCleanup(self.clients_patch.stop)
 
+    def test_logo_is_served_at_published_page_path(self):
+        response = self.client.get("/public/banco-bradesco-logo-vertical.png")
+        try:
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.mimetype, "image/png")
+            self.assertGreater(len(response.data), 0)
+        finally:
+            response.close()
+
     def test_unknown_client_does_not_send_sms_or_reveal_data(self):
         with patch.object(portal, "twilio_verify") as verify:
             response = self.client.post(

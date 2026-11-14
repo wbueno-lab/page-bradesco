@@ -92,6 +92,14 @@ def script():
     return send_file(ROOT / "portal.js", mimetype="application/javascript")
 
 
+@app.get("/public/banco-bradesco-logo-vertical.png")
+def logo():
+    return send_file(
+        ROOT / "public" / "Banco_Bradesco_logo_(vertical).png",
+        mimetype="image/png",
+    )
+
+
 @app.get("/api/mode")
 def mode():
     if TEST_MODE:
