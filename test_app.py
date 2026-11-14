@@ -27,9 +27,11 @@ class ConsultationTests(unittest.TestCase):
     def test_logo_is_served_at_published_page_path(self):
         response = self.client.get("/public/banco-bradesco-logo-vertical.png")
         try:
-            self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.mimetype, "image/png")
-            self.assertGreater(len(response.data), 0)
+            self.assertEqual(response.status_code, 307)
+            self.assertEqual(
+                response.headers["Location"],
+                "/Banco_Bradesco_logo_(vertical).png",
+            )
         finally:
             response.close()
 

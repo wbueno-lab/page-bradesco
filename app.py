@@ -12,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from flask import Flask, jsonify, request, send_file, session
+from flask import Flask, jsonify, redirect, request, send_file, session
 
 from client_data import (
     ClientDataUnavailable,
@@ -94,10 +94,7 @@ def script():
 
 @app.get("/public/banco-bradesco-logo-vertical.png")
 def logo():
-    return send_file(
-        ROOT / "public" / "Banco_Bradesco_logo_(vertical).png",
-        mimetype="image/png",
-    )
+    return redirect("/Banco_Bradesco_logo_(vertical).png", code=307)
 
 
 @app.get("/api/mode")
